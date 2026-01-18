@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pixel Art Pro - Master</title>
+    <style>
+        :root { --bg: #0f172a; --panel: #1e293b; --accent: #6366f1; --success: #22c55e; }
+        
+        body {
+            margin: 0; padding: 0; display: flex; flex-direction: column;
+            height: 100vh; background: var(--bg); color: white;
+            font-family: 'Segoe UI', Roboto, sans-serif; overflow: hidden; touch-action: none;
+        }
+
+        /* --- SISTEMA DE TELAS --- */
+        .screen { display: none; height: 100%; flex-direction: column; }
+        .screen.active { display: flex; }
+
+        /* --- MENU INICIAL --- */
+        #screen-menu { justify-content: center; align-items: center; text-align: center; gap: 20px; }
+        .logo { font-size: 3rem; font-weight: 900; letter-spacing: -2px; color: var(--accent); margin-bottom: 20px; }
+        .main-nav { display: flex; flex-direction: column; gap: 15px; width: 80%; max-width: 300px; }
+
+        /* --- GALERIA --- */
+        #screen-gallery { padding: 20px; overflow-y: auto; }
+        .gallery-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px; }
+        .gallery-item { background: var(--panel); padding: 10px; border-radius: 12px; border: 1px solid #334155; }
+        .gallery-item img { width: 100%; image-rendering: pixelated; border-radius: 4px; background: white; }
+
+        /* --- EDITOR (Seu código original melhorado) --- */
+        header { padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; background: var(--panel); }
+        #viewport { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; background: #000; }
+        #canvas-stack { position: relative; line-height: 0; }
+        canvas { image-rendering: pixelated; display: block; }
+        #grid-layer { position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0.2; }
+
+        .bottom-panel { background: var(--panel); padding: 15px; border-radius: 20px 20px 0 0; }
+        .color-bar { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 15px; scrollbar-width: none; }
+        .swatch { min-width: 35px; height: 35px; border-radius: 50%; border: 2px solid transparent; }
+        .swatch.active { border-color: white; transform: scale(1.1); }
+
+        .tools { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+        
+        /* --- BOTÕES GERAIS --- */
+        button {
+            background: #334155; border: none; color: white; padding: 12px 5px;
+            border-radius: 10px; font-size: 11px; font-weight: bold; cursor: pointer;
+        }
+        button.active { background: var(--accent); }
+        .btn-large { padding: 18px; font-size: 16px; background: var(--panel); border: 1px solid var(--accent); }
+        .btn-primary { background: var(--accent); }
+    </style>
+</head>
+<body>
+
+    <div id="screen-menu" class="screen active">
+        <div class="logo">PIXEL<br>PRO</div>
+        <div class="main-nav">
+            <button class="btn-large btn-primary" onclick="showScreen('screen-editor')">NOVO DESENHO</button>
+            <button class="btn-large" onclick="openGallery()">MINHA GALERIA</button>
+        </div>
+    </div>
+
+    <div id="screen-editor" class="screen">
+        <header>
+            <button onclick="showScreen('screen-menu')">❮ VOLTAR</button>
+            <select id="res" style="background:#333; color:white; border:none; padding:5px; border-radius:5px;">
+                <option value="16">16x16</option>
+                <option value="32">32x32</option>
+                <option value="64">64x64</option>
+            </select>
+            <button id="saveBtn" style="background: var(--success);">SALVAR</button>
+        </header>
+
+        <div id="viewport">
+            <div id="canvas-stack">
+                <canvas id="paintCanvas"></canvas>
+                <canvas id="grid-layer"></canvas>
+            </div>
+        </div>
+
+        <div class="bottom-panel">
+            <div class="color-bar" id="palette">
+                <input type="color" id="colorPicker" value="#6366f1" style="width:35px; height:35px; border:none; background:none;">
+            </div>
+            <div class="tools">
+                <button id="undoBtn">DESFAZER</button>
+                <button id="drawBtn" class="active">PINCEL</button>
+                <button id="fillBtn">BALDE</button>
+                <button id="eraseBtn">APAGAR</button>
+                <button onclick="clearCanvas()">LIMPAR</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="screen-gallery" class="screen">
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+            <h2>Galeria</h2>
+            <button onclick="showScreen('screen-menu')">FECHAR</button>
+        </div>
+        <div id="gallery-list" class="gallery-grid">
+            </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('paintCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const gridCanvas = document.getElementById('grid-layer');
+        const gctx = gridCanvas.getContext('2d');
+        const colorPicker = document.getElementById('colorPicker');
+
+        let gridSize = 16;
+        const internalSize = 512;
+        let cellSize = internalSize / gridSize;
+        let history = [];
+        let mode = 'draw';
+        let isDrawing = false;
+
+        // --- NAVEGAÇÃO ---
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            if(id === 'screen-editor') init();
+        }
+
+        // --- LÓGICA DO EDITOR ---
+        function init() {
+            gridSize = parseInt(document.getElementById('res').value);
+            cellSize = internalSize / gridSize;
+            canvas.width = canvas.height = internalSize;
+            gridCanvas.width = gridCanvas.height = internalSize;
+
+            const displaySize = Math.min(window.innerWidth * 0.95, window.innerHeight * 0.5);
+            canvas.style.width = canvas.style.height = displaySize + 'px';
+            gridCanvas.style.width = gridCanvas.style.height = displaySize + 'px';
+
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            saveState();
+        }
+
+        function drawGrid() {
+            gctx.clearRect(0, 0, internalSize, internalSize);
+            gctx.strokeStyle = "#ccc";
+            gctx.lineWidth = 0.5;
+            for (let i = 0; i <= internalSize; i += cellSize) {
+                gctx.beginPath(); gctx.moveTo(i, 0); gctx.lineTo(i, internalSize); gctx.stroke();
+                gctx.beginPath(); gctx.moveTo(0, i); gctx.lineTo(internalSize, i); gctx.stroke();
+            }
+        }
+
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const x = (clientX - rect.left) * (internalSize / rect.width);
+            const y = (clientY - rect.top) * (internalSize / rect.height);
+            return { col: Math.floor(x / cellSize), row: Math.floor(y / cellSize) };
+        }
+
+        function paint(col, row) {
+            if (col >= 0 && col < gridSize && row >= 0 && row < gridSize) {
+                ctx.fillStyle = mode === 'erase' ? "#ffffff" : colorPicker.value;
+                ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+            }
+        }
+
+        function clearCanvas() {
+            if(confirm("Limpar desenho?")) init();
+        }
+
+        // --- EVENTOS DE TOQUE ---
+        const startDraw = (e) => {
+            isDrawing = true;
+            const p = getPos(e);
+            paint(p.col, p.row);
+            if(e.cancelable) e.preventDefault();
+        };
+
+        const moveDraw = (e) => {
+            if (isDrawing) {
+                const p = getPos(e);
+                paint(p.col, p.row);
+            }
+            if(e.cancelable) e.preventDefault();
+        };
+
+        canvas.addEventListener('touchstart', startDraw);
+        canvas.addEventListener('touchmove', moveDraw);
+        window.addEventListener('touchend', () => { if(isDrawing) saveState(); isDrawing = false; });
+
+        // --- HISTÓRICO E SALVAMENTO ---
+        function saveState() {
+            if (history.length > 15) history.shift();
+            history.push(canvas.toDataURL());
+        }
+
+        document.getElementById('undoBtn').onclick = () => {
+            if (history.length > 1) {
+                history.pop();
+                let img = new Image();
+                img.src = history[history.length - 1];
+                img.onload = () => ctx.drawImage(img, 0, 0);
+            }
+        };
+
+        document.getElementById('saveBtn').onclick = () => {
+            const dataUrl = canvas.toDataURL();
+            const saved = JSON.parse(localStorage.getItem('myPixels') || '[]');
+            saved.push({ id: Date.now(), img: dataUrl });
+            localStorage.setItem('myPixels', JSON.stringify(saved));
+            alert("Salvo na Galeria!");
+            showScreen('screen-menu');
+        };
+
+        // --- GALERIA ---
+        function openGallery() {
+            const list = document.getElementById('gallery-list');
+            list.innerHTML = '';
+            const saved = JSON.parse(localStorage.getItem('myPixels') || '[]');
+            
+            if(saved.length === 0) {
+                list.innerHTML = '<p style="grid-column: 1/-1">Nenhum desenho salvo ainda.</p>';
+            }
+
+            saved.reverse().forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'gallery-item';
+                div.innerHTML = `<img src="${item.img}">`;
+                list.appendChild(div);
+            });
+            showScreen('screen-gallery');
+        }
+
+        // --- PALETA ---
+        const colors = ['#000000', '#ffffff', '#ff4757', '#2ed573', '#1e90ff', '#eccc68', '#ff7f50', '#a29bfe'];
+        const pal = document.getElementById('palette');
+        colors.forEach(c => {
+            const d = document.createElement('div');
+            d.className = 'swatch';
+            d.style.background = c;
+            d.onclick = () => { colorPicker.value = c; mode = 'draw'; };
+            pal.appendChild(d);
+        });
+
+        // Ferramentas
+        document.getElementById('drawBtn').onclick = () => mode = 'draw';
+        document.getElementById('eraseBtn').onclick = () => mode = 'erase';
+        document.getElementById('res').onchange = init;
+
+    </script>
+</body>
+</html>
+
